@@ -44,6 +44,13 @@
   //   "CF_ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
   //   "CF_ACCESS_AUD": "your-access-application-aud-tag"
   // },
+  // Hosted accounts are off unless HOSTED_MODE is exactly "true".
+  // Leave this unset for a normal self-hosted install. Checkout URL and webhook
+  // secret are Worker secrets, not vars: see the README.
+  // "vars": {
+  //   "HOSTED_MODE": "true",
+  //   "LEMONSQUEEZY_VARIANT_ID": "123456"
+  // },
   // "routes": [
   //   { "pattern": "qr.example.com", "custom_domain": true }
   // ],

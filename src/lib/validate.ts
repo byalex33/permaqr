@@ -14,17 +14,17 @@ const MAX_LOGO_CHARS = 120_000;
 
 const reserved = new Set<string>(RESERVED_SLUGS);
 
-export function slugProblem(input: string): string | null {
+export function slugProblem(input: string, extraReserved: readonly string[] = []): string | null {
   const slug = input.trim().toLowerCase();
-  if (reserved.has(slug)) return "That short code is reserved.";
+  if (reserved.has(slug) || extraReserved.includes(slug)) return "That short code is reserved.";
   if (!SLUG_PATTERN.test(slug)) {
     return "Slug must be 1–64 characters: letters, numbers, hyphens, or underscores, and must start and end with a letter or number.";
   }
   return null;
 }
 
-export function normalizeSlug(input: string): string | null {
-  if (slugProblem(input)) return null;
+export function normalizeSlug(input: string, extraReserved: readonly string[] = []): string | null {
+  if (slugProblem(input, extraReserved)) return null;
   return input.trim().toLowerCase();
 }
 

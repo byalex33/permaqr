@@ -36,7 +36,9 @@
       <nav>
         <a href="#features">Features</a>
         <a href="#compare">Compare</a>
+        <a href="#hosted" id="hosted-nav" hidden>Hosted</a>
         <a href="https://github.com/byalex33/permaqr">GitHub</a>
+        <a class="nav-login" id="hosted-signin" hidden href="/account/login">Hosted sign-in</a>
         <a class="nav-login" href="/login">Dashboard</a>
       </nav>
     </header>
@@ -56,7 +58,7 @@
             </a>
             <a class="btn btn-ghost" href="https://github.com/byalex33/permaqr">View the source</a>
           </div>
-          <p class="fine">MIT licensed. One admin password. No account with us, because there is no us.</p>
+          <p class="fine" id="fine-print">MIT licensed. One admin password. No account with us, because there is no us.</p>
         </div>
 
         <div class="stage" aria-hidden="false">
@@ -219,6 +221,25 @@
             <p>When the menu changes, edit the destination. The ink on the paper stays put.</p>
           </li>
         </ol>
+      </section>
+      <section class="hosted" id="hosted" hidden>
+        <div class="section-head">
+          <p class="kicker">Don't want to self-host?</p>
+          <h2>$29 once. Your printed codes keep working.</h2>
+        </div>
+        <article class="receipt hosted-card">
+          <p class="receipt-brand">PERMAQR HOSTED</p>
+          <p class="receipt-line"><span>Lifetime workspace</span><span>$29.00</span></p>
+          <p class="receipt-line"><span>Your codes at /u/you/…</span><span>incl.</span></p>
+          <p class="receipt-line"><span>Designer, counts, export</span><span>incl.</span></p>
+          <hr />
+          <p class="receipt-total"><span>Due once</span><span>$29.00</span></p>
+          <p class="receipt-foot">
+            Same app. We run the Worker so you don't. Self-hosting stays free, and it is still the whole product.
+            Up to 100 codes. Lemon Squeezy handles the receipt and VAT.
+          </p>
+          <a class="btn btn-stamp" id="hosted-checkout" href="/api/hosted/checkout">Pay $29 once</a>
+        </article>
       </section>
     </main>
 

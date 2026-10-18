@@ -18,7 +18,11 @@ async function login(): Promise<string> {
 
 async function resetStorage(): Promise<void> {
   await env.DB.prepare("DELETE FROM scans").run();
+  await env.DB.prepare("DELETE FROM account_codes").run();
   await env.DB.prepare("DELETE FROM codes").run();
+  await env.DB.prepare("DELETE FROM account_orders").run();
+  await env.DB.prepare("DELETE FROM account_settings").run();
+  await env.DB.prepare("DELETE FROM accounts").run();
   await env.DB.prepare("DELETE FROM settings").run();
   const listed = await env.CODES.list();
   await Promise.all(listed.keys.map((key) => env.CODES.delete(key.name)));

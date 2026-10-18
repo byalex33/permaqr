@@ -8,6 +8,7 @@ import {
 import type { AppEnv } from "../env";
 import { parseCsv, toCsv, unescapeImported } from "./csv";
 import { getFallbackMessage, setFallbackMessage } from "./fallback";
+import { accountCacheKey, HOSTED_CODE_CAP } from "./hosted-config";
 import { parseUserAgent, referrerHost, requestCountry } from "./ua";
 import {
   cleanTitle,
@@ -33,10 +34,17 @@ type CodeRow = {
 
 export type CacheEntry = { id: string; destination: string; paused: boolean };
 
+/** A hosted workspace. Omit it and every query stays on the operator `codes` table. */
+export type CodeScope = { accountId: string; handle: string };
+
 const MAX_CODES = 1000;
 
 export function cacheKey(slug: string): string {
   return `code:${slug}`;
+}
+
+function cacheKeyFor(slug: string, scope?: CodeScope): string {
+  return scope ? accountCacheKey(scope.handle, slug) : cacheKey(slug);
 }
 
 function toRecord(row: CodeRow): CodeRecord {
@@ -53,12 +61,12 @@ function toRecord(row: CodeRow): CodeRecord {
   };
 }
 
-async function putCache(env: AppEnv, slug: string, entry: CacheEntry): Promise<void> {
-  await env.CODES.put(cacheKey(slug), JSON.stringify(entry));
+async function putCache(env: AppEnv, slug: string, entry: CacheEntry, scope?: CodeScope): Promise<void> {
+  await env.CODES.put(cacheKeyFor(slug, scope), JSON.stringify(entry));
 }
 
-async function dropCache(env: AppEnv, slug: string): Promise<void> {
-  await env.CODES.delete(cacheKey(slug));
+async function dropCache(env: AppEnv, slug: string, scope?: CodeScope): Promise<void> {
+  await env.CODES.delete(cacheKeyFor(slug, scope));
 }
 
 export async function lookupCode(
@@ -99,6 +107,51 @@ export async function lookupCode(
   return { entry, fill: env.CODES.put(key, JSON.stringify(entry)) };
 }
 
+/** KV first, same shape as `lookupCode`, keyed by handle so it cannot collide with operator slugs. */
+export async function lookupAccountCode(
+  env: AppEnv,
+  handle: string,
+  slug: string,
+): Promise<{ entry: CacheEntry | null; fill?: Promise<unknown> }> {
+  const key = accountCacheKey(handle, slug);
+  let raw: string | null = null;
+  try {
+    raw = await env.CODES.get(key);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        message: "kv read failed",
+        error: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+  }
+  if (raw === "0") return { entry: null };
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<CacheEntry>;
+      if (parsed.id && parsed.destination && typeof parsed.paused === "boolean") {
+        return { entry: { id: parsed.id, destination: parsed.destination, paused: parsed.paused } };
+      }
+    } catch {
+      // Fall through to D1 and refresh the cache.
+    }
+  }
+
+  const row = await env.DB.prepare(
+    `SELECT c.id, c.destination, c.paused
+     FROM account_codes c
+     JOIN accounts a ON a.id = c.account_id
+     WHERE a.handle = ? AND c.slug = ? AND a.disabled = 0`,
+  )
+    .bind(handle, slug)
+    .first<{ id: string; destination: string; paused: number }>();
+  if (!row) {
+    return { entry: null, fill: env.CODES.put(key, "0", { expirationTtl: 60 }) };
+  }
+  const entry: CacheEntry = { id: row.id, destination: row.destination, paused: row.paused === 1 };
+  return { entry, fill: env.CODES.put(key, JSON.stringify(entry)) };
+}
+
 export async function recordScan(env: AppEnv, request: Request, codeId: string): Promise<void> {
   try {
     const agent = parseUserAgent(request.headers.get("User-Agent"));
@@ -117,44 +170,64 @@ export async function recordScan(env: AppEnv, request: Request, codeId: string):
   }
 }
 
-const LIST_SQL = `
+const LIST_COLUMNS = `
   SELECT c.id, c.slug, c.destination, c.title, c.paused, c.style, c.created_at, c.updated_at,
          (SELECT COUNT(*) FROM scans s WHERE s.code_id = c.id) AS scans
-  FROM codes c
-  ORDER BY c.updated_at DESC
-  LIMIT ?
 `;
 
-export async function listCodes(env: AppEnv): Promise<CodeRecord[]> {
-  const { results } = await env.DB.prepare(LIST_SQL).bind(MAX_CODES).all<CodeRow>();
+export async function listCodes(env: AppEnv, scope?: CodeScope): Promise<CodeRecord[]> {
+  const statement = scope
+    ? env.DB.prepare(
+        `${LIST_COLUMNS} FROM account_codes c WHERE c.account_id = ? ORDER BY c.updated_at DESC LIMIT ?`,
+      ).bind(scope.accountId, HOSTED_CODE_CAP)
+    : env.DB.prepare(`${LIST_COLUMNS} FROM codes c ORDER BY c.updated_at DESC LIMIT ?`).bind(MAX_CODES);
+  const { results } = await statement.all<CodeRow>();
   return results.map(toRecord);
 }
 
-export async function getCodeById(env: AppEnv, id: string): Promise<CodeRecord | null> {
-  const row = await env.DB.prepare(
-    `SELECT c.id, c.slug, c.destination, c.title, c.paused, c.style, c.created_at, c.updated_at,
-            (SELECT COUNT(*) FROM scans s WHERE s.code_id = c.id) AS scans
-     FROM codes c WHERE c.id = ?`,
-  )
-    .bind(id)
-    .first<CodeRow>();
+export async function getCodeById(env: AppEnv, id: string, scope?: CodeScope): Promise<CodeRecord | null> {
+  const statement = scope
+    ? env.DB.prepare(
+        `${LIST_COLUMNS} FROM account_codes c WHERE c.id = ? AND c.account_id = ?`,
+      ).bind(id, scope.accountId)
+    : env.DB.prepare(`${LIST_COLUMNS} FROM codes c WHERE c.id = ?`).bind(id);
+  const row = await statement.first<CodeRow>();
   return row ? toRecord(row) : null;
 }
 
-async function uniqueSlug(env: AppEnv, preferred?: string): Promise<string | Response> {
+async function accountCodeCount(env: AppEnv, accountId: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM account_codes WHERE account_id = ?")
+    .bind(accountId)
+    .first<{ count: number }>();
+  return Number(row?.count) || 0;
+}
+
+async function slugInUse(env: AppEnv, slug: string, scope?: CodeScope): Promise<boolean> {
+  const statement = scope
+    ? env.DB.prepare("SELECT id FROM account_codes WHERE slug = ? AND account_id = ?").bind(slug, scope.accountId)
+    : env.DB.prepare("SELECT id FROM codes WHERE slug = ?").bind(slug);
+  return Boolean(await statement.first());
+}
+
+async function uniqueSlug(
+  env: AppEnv,
+  preferred: string | undefined,
+  scope?: CodeScope,
+  extraReserved: readonly string[] = [],
+): Promise<string | Response> {
   if (preferred) {
-    const problem = slugProblem(preferred);
+    const problem = slugProblem(preferred, extraReserved);
     if (problem) return Response.json({ error: problem }, { status: 400 });
-    const slug = normalizeSlug(preferred);
+    const slug = normalizeSlug(preferred, extraReserved);
     if (!slug) return Response.json({ error: "Slug is invalid." }, { status: 400 });
-    const existing = await env.DB.prepare("SELECT id FROM codes WHERE slug = ?").bind(slug).first();
-    if (existing) return Response.json({ error: "That short code is already in use." }, { status: 409 });
+    if (await slugInUse(env, slug, scope)) {
+      return Response.json({ error: "That short code is already in use." }, { status: 409 });
+    }
     return slug;
   }
   for (let attempt = 0; attempt < 6; attempt++) {
     const slug = randomSlug();
-    const existing = await env.DB.prepare("SELECT id FROM codes WHERE slug = ?").bind(slug).first();
-    if (!existing) return slug;
+    if (!(await slugInUse(env, slug, scope))) return slug;
   }
   return Response.json({ error: "Could not allocate a short code. Try a custom slug." }, { status: 500 });
 }
@@ -162,6 +235,8 @@ async function uniqueSlug(env: AppEnv, preferred?: string): Promise<string | Res
 export async function createCode(
   env: AppEnv,
   input: { slug?: unknown; destination?: unknown; title?: unknown; style?: unknown },
+  scope?: CodeScope,
+  extraReserved: readonly string[] = [],
 ): Promise<CodeRecord | Response> {
   const destination = typeof input.destination === "string" ? validateDestination(input.destination) : null;
   if (!destination) {
@@ -169,18 +244,35 @@ export async function createCode(
   }
   const style = validateStyle(input.style === undefined ? DEFAULT_STYLE : input.style);
   if (!style) return Response.json({ error: "QR style is invalid." }, { status: 400 });
-  const slug = await uniqueSlug(env, typeof input.slug === "string" && input.slug.trim() ? input.slug : undefined);
+  if (scope && (await accountCodeCount(env, scope.accountId)) >= HOSTED_CODE_CAP) {
+    return Response.json({ error: `Hosted accounts are limited to ${HOSTED_CODE_CAP} codes.` }, { status: 400 });
+  }
+  const slug = await uniqueSlug(
+    env,
+    typeof input.slug === "string" && input.slug.trim() ? input.slug : undefined,
+    scope,
+    extraReserved,
+  );
   if (slug instanceof Response) return slug;
   const now = Date.now();
   const id = crypto.randomUUID();
   const title = cleanTitle(input.title);
-  await env.DB.prepare(
-    "INSERT INTO codes (id, slug, destination, title, paused, style, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)",
-  )
-    .bind(id, slug, destination, title, JSON.stringify(style), now, now)
-    .run();
-  await putCache(env, slug, { id, destination, paused: false });
-  const created = await getCodeById(env, id);
+  if (scope) {
+    await env.DB.prepare(
+      `INSERT INTO account_codes (id, account_id, slug, destination, title, paused, style, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+    )
+      .bind(id, scope.accountId, slug, destination, title, JSON.stringify(style), now, now)
+      .run();
+  } else {
+    await env.DB.prepare(
+      "INSERT INTO codes (id, slug, destination, title, paused, style, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)",
+    )
+      .bind(id, slug, destination, title, JSON.stringify(style), now, now)
+      .run();
+  }
+  await putCache(env, slug, { id, destination, paused: false }, scope);
+  const created = await getCodeById(env, id, scope);
   if (!created) return Response.json({ error: "Code was created but could not be read back." }, { status: 500 });
   return created;
 }
@@ -189,8 +281,9 @@ export async function updateCode(
   env: AppEnv,
   id: string,
   input: { destination?: unknown; title?: unknown; paused?: unknown; style?: unknown },
+  scope?: CodeScope,
 ): Promise<CodeRecord | Response> {
-  const current = await getCodeById(env, id);
+  const current = await getCodeById(env, id, scope);
   if (!current) return Response.json({ error: "Code not found." }, { status: 404 });
 
   let destination = current.destination;
@@ -220,25 +313,37 @@ export async function updateCode(
   }
 
   const now = Date.now();
-  await env.DB.prepare(
-    "UPDATE codes SET destination = ?, title = ?, paused = ?, style = ?, updated_at = ? WHERE id = ?",
-  )
-    .bind(destination, title, paused ? 1 : 0, JSON.stringify(style), now, id)
-    .run();
-  await putCache(env, current.slug, { id, destination, paused });
-  const updated = await getCodeById(env, id);
+  if (scope) {
+    await env.DB.prepare(
+      "UPDATE account_codes SET destination = ?, title = ?, paused = ?, style = ?, updated_at = ? WHERE id = ? AND account_id = ?",
+    )
+      .bind(destination, title, paused ? 1 : 0, JSON.stringify(style), now, id, scope.accountId)
+      .run();
+  } else {
+    await env.DB.prepare(
+      "UPDATE codes SET destination = ?, title = ?, paused = ?, style = ?, updated_at = ? WHERE id = ?",
+    )
+      .bind(destination, title, paused ? 1 : 0, JSON.stringify(style), now, id)
+      .run();
+  }
+  await putCache(env, current.slug, { id, destination, paused }, scope);
+  const updated = await getCodeById(env, id, scope);
   if (!updated) return Response.json({ error: "Code not found." }, { status: 404 });
   return updated;
 }
 
-export async function deleteCode(env: AppEnv, id: string): Promise<boolean> {
-  const current = await env.DB.prepare("SELECT slug FROM codes WHERE id = ?").bind(id).first<{ slug: string }>();
+export async function deleteCode(env: AppEnv, id: string, scope?: CodeScope): Promise<boolean> {
+  const current = scope
+    ? await env.DB.prepare("SELECT slug FROM account_codes WHERE id = ? AND account_id = ?")
+        .bind(id, scope.accountId)
+        .first<{ slug: string }>()
+    : await env.DB.prepare("SELECT slug FROM codes WHERE id = ?").bind(id).first<{ slug: string }>();
   if (!current) return false;
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM scans WHERE code_id = ?").bind(id),
-    env.DB.prepare("DELETE FROM codes WHERE id = ?").bind(id),
-  ]);
-  await dropCache(env, current.slug);
+  const removeCode = scope
+    ? env.DB.prepare("DELETE FROM account_codes WHERE id = ? AND account_id = ?").bind(id, scope.accountId)
+    : env.DB.prepare("DELETE FROM codes WHERE id = ?").bind(id);
+  await env.DB.batch([env.DB.prepare("DELETE FROM scans WHERE code_id = ?").bind(id), removeCode]);
+  await dropCache(env, current.slug, scope);
   return true;
 }
 
@@ -254,8 +359,14 @@ function dayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
-export async function getAnalytics(env: AppEnv, id: string, range: string, now = Date.now()): Promise<AnalyticsResponse | null> {
-  const code = await env.DB.prepare("SELECT id FROM codes WHERE id = ?").bind(id).first();
+export async function getAnalytics(
+  env: AppEnv,
+  id: string,
+  range: string,
+  scope?: CodeScope,
+  now = Date.now(),
+): Promise<AnalyticsResponse | null> {
+  const code = await getCodeById(env, id, scope);
   if (!code) return null;
   const { key, since } = rangeStart(range, now);
   const totalRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM scans WHERE code_id = ?")
@@ -323,12 +434,12 @@ export async function getAnalytics(env: AppEnv, id: string, range: string, now =
   };
 }
 
-export async function exportJson(env: AppEnv): Promise<ExportFile> {
-  const codes = await listCodes(env);
+export async function exportJson(env: AppEnv, scope?: CodeScope): Promise<ExportFile> {
+  const codes = await listCodes(env, scope);
   return {
     version: 1,
     exported_at: new Date().toISOString(),
-    fallback_message: await getFallbackMessage(env),
+    fallback_message: await getFallbackMessage(env, scope?.accountId),
     codes: codes
       .slice()
       .reverse()
@@ -344,8 +455,8 @@ export async function exportJson(env: AppEnv): Promise<ExportFile> {
   };
 }
 
-export async function exportCsv(env: AppEnv): Promise<string> {
-  const codes = await listCodes(env);
+export async function exportCsv(env: AppEnv, scope?: CodeScope): Promise<string> {
+  const codes = await listCodes(env, scope);
   return toCsv(
     ["slug", "title", "destination", "paused", "created_at"],
     codes
@@ -384,6 +495,8 @@ export async function importPayload(
   format: "json" | "csv",
   text: string,
   mode: "merge" | "replace",
+  scope?: CodeScope,
+  extraReserved: readonly string[] = [],
 ): Promise<{ created: number; updated: number; errors: string[] } | Response> {
   const rows: ImportRow[] = [];
   const errors: string[] = [];
@@ -408,7 +521,7 @@ export async function importPayload(
     }
     if (typeof body.fallback_message === "string") fallback = body.fallback_message;
     if (!Array.isArray(body.codes)) return Response.json({ error: "JSON export must include a codes array." }, { status: 400 });
-    body.codes.forEach((item, index) => collectImportRow(item, index, now, rows, errors));
+    body.codes.forEach((item, index) => collectImportRow(item, index, now, rows, errors, extraReserved));
   } else {
     const table = parseCsv(text);
     if (table.length === 0) return Response.json({ error: "CSV is empty." }, { status: 400 });
@@ -435,12 +548,14 @@ export async function importPayload(
         now,
         rows,
         errors,
+        extraReserved,
       );
     }
   }
 
-  if (rows.length > MAX_CODES) {
-    return Response.json({ error: `Import is limited to ${MAX_CODES} codes.` }, { status: 400 });
+  const rowCap = scope ? HOSTED_CODE_CAP : MAX_CODES;
+  if (rows.length > rowCap) {
+    return Response.json({ error: `Import is limited to ${rowCap} codes.` }, { status: 400 });
   }
 
   const seen = new Set<string>();
@@ -456,39 +571,89 @@ export async function importPayload(
 
   let created = 0;
   let updated = 0;
+  const pendingNew = uniqueRows.length;
+  if (scope && mode === "merge") {
+    const existingCount = await accountCodeCount(env, scope.accountId);
+    let additions = 0;
+    for (const row of uniqueRows) {
+      if (!(await slugInUse(env, row.slug, scope))) additions++;
+    }
+    if (existingCount + additions > HOSTED_CODE_CAP) {
+      return Response.json({ error: `Hosted accounts are limited to ${HOSTED_CODE_CAP} codes.` }, { status: 400 });
+    }
+  }
+  if (scope && mode === "replace" && pendingNew > HOSTED_CODE_CAP) {
+    return Response.json({ error: `Hosted accounts are limited to ${HOSTED_CODE_CAP} codes.` }, { status: 400 });
+  }
+
   for (const row of uniqueRows) {
-    const existing = await env.DB.prepare("SELECT id, created_at FROM codes WHERE slug = ?")
-      .bind(row.slug)
-      .first<{ id: string; created_at: number }>();
+    const existing = scope
+      ? await env.DB.prepare("SELECT id, created_at FROM account_codes WHERE slug = ? AND account_id = ?")
+          .bind(row.slug, scope.accountId)
+          .first<{ id: string; created_at: number }>()
+      : await env.DB.prepare("SELECT id, created_at FROM codes WHERE slug = ?")
+          .bind(row.slug)
+          .first<{ id: string; created_at: number }>();
     if (existing) {
-      await env.DB.prepare(
-        "UPDATE codes SET destination = ?, title = ?, paused = ?, style = ?, updated_at = ? WHERE id = ?",
-      )
-        .bind(row.destination, row.title, row.paused ? 1 : 0, JSON.stringify(row.style), now, existing.id)
-        .run();
-      await putCache(env, row.slug, { id: existing.id, destination: row.destination, paused: row.paused });
+      if (scope) {
+        await env.DB.prepare(
+          "UPDATE account_codes SET destination = ?, title = ?, paused = ?, style = ?, updated_at = ? WHERE id = ? AND account_id = ?",
+        )
+          .bind(row.destination, row.title, row.paused ? 1 : 0, JSON.stringify(row.style), now, existing.id, scope.accountId)
+          .run();
+      } else {
+        await env.DB.prepare(
+          "UPDATE codes SET destination = ?, title = ?, paused = ?, style = ?, updated_at = ? WHERE id = ?",
+        )
+          .bind(row.destination, row.title, row.paused ? 1 : 0, JSON.stringify(row.style), now, existing.id)
+          .run();
+      }
+      await putCache(env, row.slug, { id: existing.id, destination: row.destination, paused: row.paused }, scope);
       updated++;
     } else {
       const id = crypto.randomUUID();
-      await env.DB.prepare(
-        "INSERT INTO codes (id, slug, destination, title, paused, style, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-        .bind(id, row.slug, row.destination, row.title, row.paused ? 1 : 0, JSON.stringify(row.style), row.createdAt, now)
-        .run();
-      await putCache(env, row.slug, { id, destination: row.destination, paused: row.paused });
+      if (scope) {
+        await env.DB.prepare(
+          `INSERT INTO account_codes (id, account_id, slug, destination, title, paused, style, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+          .bind(
+            id,
+            scope.accountId,
+            row.slug,
+            row.destination,
+            row.title,
+            row.paused ? 1 : 0,
+            JSON.stringify(row.style),
+            row.createdAt,
+            now,
+          )
+          .run();
+      } else {
+        await env.DB.prepare(
+          "INSERT INTO codes (id, slug, destination, title, paused, style, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+          .bind(id, row.slug, row.destination, row.title, row.paused ? 1 : 0, JSON.stringify(row.style), row.createdAt, now)
+          .run();
+      }
+      await putCache(env, row.slug, { id, destination: row.destination, paused: row.paused }, scope);
       created++;
     }
   }
 
   if (mode === "replace") {
-    const { results } = await env.DB.prepare("SELECT id, slug FROM codes").all<{ id: string; slug: string }>();
+    const { results } = scope
+      ? await env.DB.prepare("SELECT id, slug FROM account_codes WHERE account_id = ?")
+          .bind(scope.accountId)
+          .all<{ id: string; slug: string }>()
+      : await env.DB.prepare("SELECT id, slug FROM codes").all<{ id: string; slug: string }>();
     for (const code of results) {
       if (seen.has(code.slug)) continue;
-      await deleteCode(env, code.id);
+      await deleteCode(env, code.id, scope);
     }
   }
 
-  if (fallback !== undefined) await setFallbackMessage(env, fallback);
+  if (fallback !== undefined) await setFallbackMessage(env, fallback, scope?.accountId);
   return { created, updated, errors };
 }
 
@@ -498,10 +663,11 @@ function collectImportRow(
   now: number,
   rows: ImportRow[],
   errors: string[],
+  extraReserved: readonly string[] = [],
 ): void {
   const row = (typeof item === "object" && item !== null ? item : {}) as Record<string, unknown>;
   const slugInput = typeof row.slug === "string" ? unescapeImported(row.slug) : "";
-  const slug = normalizeSlug(slugInput);
+  const slug = normalizeSlug(slugInput, extraReserved);
   const destinationInput = typeof row.destination === "string" ? unescapeImported(row.destination) : "";
   const destination = validateDestination(destinationInput);
   if (!slug || !destination) {

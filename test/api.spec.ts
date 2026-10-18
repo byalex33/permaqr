@@ -6,7 +6,11 @@ const PASSWORD = "test-password";
 
 async function resetStorage(): Promise<void> {
   await env.DB.prepare("DELETE FROM scans").run();
+  await env.DB.prepare("DELETE FROM account_codes").run();
   await env.DB.prepare("DELETE FROM codes").run();
+  await env.DB.prepare("DELETE FROM account_orders").run();
+  await env.DB.prepare("DELETE FROM account_settings").run();
+  await env.DB.prepare("DELETE FROM accounts").run();
   await env.DB.prepare("DELETE FROM settings").run();
   const listed = await env.CODES.list();
   await Promise.all(listed.keys.map((key) => env.CODES.delete(key.name)));
@@ -26,6 +30,44 @@ function cookieFrom(response: Response): string {
 
 beforeEach(async () => {
   await resetStorage();
+});
+
+describe("hosted mode off", () => {
+  it("keeps the single-admin URLs and does not expose hosted routes", async () => {
+    const config = await exports.default.fetch("https://permaqr.test/api/config");
+    expect(await config.json()).toEqual({ hosted: false });
+
+    const webhook = await exports.default.fetch("https://permaqr.test/api/webhooks/lemonsqueezy", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(webhook.status).toBe(404);
+
+    const checkout = await exports.default.fetch("https://permaqr.test/api/hosted/checkout", { redirect: "manual" });
+    expect(checkout.status).toBe(404);
+
+    const cookie = cookieFrom(await login());
+    for (const slug of ["hello", "u", "account"]) {
+      const created = await exports.default.fetch("https://permaqr.test/api/codes", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ slug, destination: `https://cafe.example/${slug}` }),
+      });
+      expect(created.status).toBe(201);
+    }
+
+    const hello = await exports.default.fetch("https://permaqr.test/hello", { redirect: "manual" });
+    expect(hello.status).toBe(302);
+    expect(hello.headers.get("location")).toBe("https://cafe.example/hello");
+
+    const nested = await exports.default.fetch("https://permaqr.test/u/someone/menu");
+    expect(nested.status).toBe(404);
+
+    const landing = await exports.default.fetch("https://permaqr.test/");
+    const html = await landing.text();
+    expect(html).toContain("No account with us, because there is no us.");
+    expect(html).toContain('id="hosted" hidden');
+  });
 });
 
 describe("auth", () => {

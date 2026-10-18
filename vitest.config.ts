@@ -8,7 +8,13 @@ process.env.ADMIN_PASSWORD ??= "test-password";
 const assets = path.resolve("dist/client");
 fs.mkdirSync(path.join(assets, "app"), { recursive: true });
 if (!fs.existsSync(path.join(assets, "index.html"))) {
-  fs.writeFileSync(path.join(assets, "index.html"), "<!doctype html><title>PermaQR</title><h1>PermaQR</h1>");
+  fs.writeFileSync(
+    path.join(assets, "index.html"),
+    `<!doctype html><title>PermaQR</title><h1>PermaQR</h1>
+<p class="fine" id="fine-print">MIT licensed. One admin password. No account with us, because there is no us.</p>
+<section class="hosted" id="hosted" hidden></section>
+<a id="hosted-signin" hidden href="/account/login">Hosted sign-in</a>`,
+  );
 }
 if (!fs.existsSync(path.join(assets, "app/index.html"))) {
   fs.writeFileSync(path.join(assets, "app/index.html"), "<!doctype html><title>PermaQR</title>");
@@ -31,5 +37,6 @@ export default defineConfig({
   ],
   test: {
     setupFiles: ["./test/apply-migrations.ts"],
+    exclude: ["**/node_modules/**", "**/dist/**", "test/hosted.spec.ts"],
   },
 });

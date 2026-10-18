@@ -77,3 +77,25 @@ const qrHost = document.querySelector<HTMLElement>("#qr-live");
 const phone = document.querySelector<HTMLElement>("#phone-screen");
 if (qrHost) mountQr(qrHost);
 if (phone) mountCycle(phone);
+
+async function mountHostedOffer(): Promise<void> {
+  const section = document.querySelector<HTMLElement>("#hosted");
+  if (!section) return;
+  try {
+    const response = await fetch("/api/config");
+    if (!response.ok) return;
+    const config = (await response.json()) as { hosted?: boolean };
+    if (!config.hosted) return;
+    section.hidden = false;
+    document.querySelector("#hosted-signin")?.removeAttribute("hidden");
+    document.querySelector("#hosted-nav")?.removeAttribute("hidden");
+    const fine = document.querySelector("#fine-print");
+    if (fine) {
+      fine.textContent = "MIT licensed. Self-hosting stays free. Hosted is $29 once if you would rather not run it.";
+    }
+  } catch {
+    // The landing page still works if the config request fails.
+  }
+}
+
+void mountHostedOffer();

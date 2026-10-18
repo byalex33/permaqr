@@ -7,7 +7,19 @@ import { ApiError, api, downloadExport } from "./api";
 import { Designer } from "./designer";
 
 type Tab = "link" | "design" | "analytics";
-type Pane = "code" | "settings";
+type Pane = "code" | "settings" | "accounts";
+type StudioMode = "operator" | "account";
+
+type AccountSummary = {
+  id: string;
+  email: string;
+  handle: string;
+  disabled: boolean;
+  password_set: boolean;
+  code_count: number;
+  test_mode: boolean;
+  created_at: number;
+};
 
 function Mark() {
   return (
@@ -65,7 +77,203 @@ function Login() {
   );
 }
 
-function Studio() {
+function AccountLogin() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+
+  async function submit(event: Event): Promise<void> {
+    event.preventDefault();
+    setPending(true);
+    setError("");
+    try {
+      await api("/api/account/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      location.href = "/account";
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not sign in");
+      setPending(false);
+    }
+  }
+
+  return (
+    <main class="login-wrap">
+      <form class="sheet login-card" onSubmit={(event) => void submit(event)}>
+        <p class="brand">
+          <Mark /> PermaQR
+        </p>
+        <h1>Your hosted workspace.</h1>
+        <p class="lede">Sign in with the email you paid with and the password you set after checkout.</p>
+        <label>
+          Email
+          <input
+            type="email"
+            autoComplete="username"
+            value={email}
+            onInput={(event) => setEmail(event.currentTarget.value)}
+            required
+          />
+        </label>
+        <label>
+          Password
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onInput={(event) => setPassword(event.currentTarget.value)}
+            required
+          />
+        </label>
+        {error ? <p class="error">{error}</p> : null}
+        <button class="btn btn-stamp" type="submit" disabled={pending}>
+          {pending ? "Checking…" : "Open dashboard"}
+        </button>
+        <p class="hint">
+          First time here? Use the setup link from the checkout page.{" "}
+          <a href="/welcome">Open the setup page</a>
+        </p>
+      </form>
+    </main>
+  );
+}
+
+function Setup() {
+  const params = new URLSearchParams(location.search);
+  const [token] = useState(params.get("token") ?? "");
+  const [orderIdentifier, setOrderIdentifier] = useState(params.get("order_identifier") ?? "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [status, setStatus] = useState<"wait" | "ready" | "done">(token ? "ready" : "wait");
+  const [note, setNote] = useState(token ? "Choose a password for this workspace." : "Waiting for the payment notification.");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (token) return;
+    let stopped = false;
+    const tick = async (): Promise<void> => {
+      try {
+        let identifier = orderIdentifier;
+        if (!identifier) {
+          const claimed = await api<{ status: string; order_identifier?: string; email?: string }>("/api/hosted/claim", {
+            method: "POST",
+          });
+          if (stopped) return;
+          if (claimed.status === "missing") {
+            setNote("No checkout is in progress in this browser. Use the link from the payment confirmation, or start checkout again.");
+            return;
+          }
+          if (claimed.status !== "ready" || !claimed.order_identifier) {
+            setNote("Waiting for the payment notification. This usually takes a few seconds.");
+            return;
+          }
+          identifier = claimed.order_identifier;
+          setOrderIdentifier(identifier);
+          if (claimed.email) setEmail(claimed.email);
+        }
+        const order = await api<{ status: string; email?: string; password_set?: boolean; disabled?: boolean }>(
+          `/api/hosted/order?order_identifier=${encodeURIComponent(identifier)}`,
+        );
+        if (stopped) return;
+        if (order.status !== "ready") {
+          setNote("Waiting for the payment notification. This usually takes a few seconds.");
+          return;
+        }
+        if (order.email) setEmail(order.email);
+        if (order.disabled) {
+          setNote("This workspace is disabled.");
+          return;
+        }
+        if (order.password_set) {
+          setStatus("done");
+          setNote("A password is already set.");
+          return;
+        }
+        setStatus("ready");
+        setNote("Payment received. Set a password. The link works for 7 days, or until you set one.");
+      } catch (cause) {
+        if (!stopped) setNote(cause instanceof Error ? cause.message : "Still waiting.");
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 2000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [orderIdentifier, token]);
+
+  async function submit(event: Event): Promise<void> {
+    event.preventDefault();
+    setError("");
+    if (password !== confirm) {
+      setError("Those passwords do not match.");
+      return;
+    }
+    setPending(true);
+    try {
+      await api("/api/account/setup", {
+        method: "POST",
+        body: JSON.stringify({ password, token: token || undefined, order_identifier: orderIdentifier || undefined }),
+      });
+      location.href = "/account";
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not set the password");
+      setPending(false);
+    }
+  }
+
+  return (
+    <main class="login-wrap">
+      <form class="sheet login-card" onSubmit={(event) => void submit(event)}>
+        <p class="brand">
+          <Mark /> PermaQR
+        </p>
+        <h1>Set a password.</h1>
+        <p class="lede">{note}</p>
+        {email ? <p class="hint">Workspace for {email}</p> : null}
+        {status === "done" ? (
+          <a class="btn btn-stamp" href="/account/login">
+            Sign in
+          </a>
+        ) : null}
+        {status === "ready" ? (
+          <>
+            <label>
+              Password
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={10}
+                value={password}
+                onInput={(event) => setPassword(event.currentTarget.value)}
+                required
+              />
+            </label>
+            <label>
+              Confirm password
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={10}
+                value={confirm}
+                onInput={(event) => setConfirm(event.currentTarget.value)}
+                required
+              />
+            </label>
+            {error ? <p class="error">{error}</p> : null}
+            <button class="btn btn-stamp" type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Save password"}
+            </button>
+          </>
+        ) : null}
+      </form>
+    </main>
+  );
+}
+
+function Studio({ mode }: { mode: StudioMode }) {
   const [ready, setReady] = useState(false);
   const [codes, setCodes] = useState<CodeRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -75,6 +283,9 @@ function Studio() {
   const [query, setQuery] = useState("");
   const [fallback, setFallback] = useState("");
   const [notice, setNotice] = useState("");
+  const [handle, setHandle] = useState("");
+  const [hosted, setHosted] = useState(false);
+  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
 
   const load = useCallback(async () => {
     const [list, settings] = await Promise.all([
@@ -87,19 +298,28 @@ function Studio() {
   }, []);
 
   useEffect(() => {
-    api<{ authenticated: boolean }>("/api/session")
+    const sessionPath = mode === "account" ? "/api/account/session" : "/api/session";
+    const loginPath = mode === "account" ? "/account/login" : "/login";
+    api<{ authenticated: boolean; handle?: string }>(sessionPath)
       .then(async (session) => {
         if (!session.authenticated) {
-          location.href = "/login";
+          location.href = loginPath;
           return;
+        }
+        if (session.handle) setHandle(session.handle);
+        if (mode === "operator") {
+          const config = await api<{ hosted?: boolean }>("/api/config");
+          setHosted(Boolean(config.hosted));
         }
         await load();
         setReady(true);
       })
       .catch(() => {
-        location.href = "/login";
+        location.href = loginPath;
       });
-  }, [load]);
+  }, [load, mode]);
+
+  const pathPrefix = mode === "account" && handle ? `/u/${handle}` : "";
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -139,6 +359,7 @@ function Studio() {
       <header class="top">
         <p class="brand">
           <Mark /> PermaQR
+          {pathPrefix ? <span class="hint"> {pathPrefix}/</span> : null}
         </p>
         <div class="top-actions">
           <button type="button" onClick={() => void downloadExport("json")}>
@@ -164,12 +385,26 @@ function Studio() {
           >
             Fallback page
           </button>
+          {hosted && mode === "operator" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setPane("accounts");
+                setSelectedId(null);
+                void api<{ accounts: AccountSummary[] }>("/api/operator/accounts")
+                  .then((result) => setAccounts(result.accounts))
+                  .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load accounts"));
+              }}
+            >
+              Hosted accounts
+            </button>
+          ) : null}
           <a href="/site">Landing</a>
           <button
             type="button"
             onClick={() => {
               void api("/api/logout", { method: "POST" }).then(() => {
-                location.href = "/";
+                location.href = mode === "account" ? "/account/login" : "/";
               });
             }}
           >
@@ -207,7 +442,9 @@ function Studio() {
                   }}
                 >
                   <span class="ticket-top">
-                    <strong>/{code.slug}</strong>
+                    <strong>
+                      {pathPrefix}/{code.slug}
+                    </strong>
                     <span>{code.paused ? "Paused" : `${code.scans} scans`}</span>
                   </span>
                   <span class="ticket-title">{code.title || "Untitled"}</span>
@@ -218,7 +455,14 @@ function Studio() {
           </ul>
         </aside>
         <section class="detail">
-          {pane === "settings" ? (
+          {pane === "accounts" ? (
+            <Accounts
+              accounts={accounts}
+              onChange={setAccounts}
+              onNotice={setNotice}
+              onError={setError}
+            />
+          ) : pane === "settings" ? (
             <Settings
               message={fallback}
               onChange={setFallback}
@@ -230,6 +474,7 @@ function Studio() {
           ) : selected ? (
             <CodeDetail
               code={selected}
+              pathPrefix={pathPrefix}
               tab={tab}
               onTab={setTab}
               onChange={replaceCode}
@@ -317,18 +562,21 @@ function CreateForm({ onCreated }: { onCreated: (code: CodeRecord) => void }) {
 
 function CodeDetail({
   code,
+  pathPrefix,
   tab,
   onTab,
   onChange,
   onDeleted,
 }: {
   code: CodeRecord;
+  pathPrefix: string;
   tab: Tab;
   onTab: (tab: Tab) => void;
   onChange: (code: CodeRecord) => void;
   onDeleted: (id: string) => void;
 }) {
-  const shortUrl = `${location.origin}/${code.slug}`;
+  const label = `${pathPrefix}/${code.slug}`;
+  const shortUrl = `${location.origin}${label}`;
   const [title, setTitle] = useState(code.title);
   const [destination, setDestination] = useState(code.destination);
   const [error, setError] = useState("");
@@ -374,7 +622,7 @@ function CodeDetail({
       <header class="code-head">
         <div>
           <p class="kicker">{code.paused ? "Paused" : "Live"}</p>
-          <h2>/{code.slug}</h2>
+          <h2>{label}</h2>
           <p class="permanent">The short code is permanent. The destination is not.</p>
         </div>
         <div class="code-actions">
@@ -399,7 +647,7 @@ function CodeDetail({
       </header>
       {confirming ? (
         <div class="confirm">
-          <p>Delete /{code.slug}? Printed copies of this code will stop working.</p>
+          <p>Delete {label}? Printed copies of this code will stop working.</p>
           <button type="button" class="danger" onClick={() => void remove()}>
             Delete code
           </button>
@@ -486,5 +734,82 @@ function Settings({
   );
 }
 
+function Accounts({
+  accounts,
+  onChange,
+  onNotice,
+  onError,
+}: {
+  accounts: AccountSummary[];
+  onChange: (accounts: AccountSummary[]) => void;
+  onNotice: (notice: string) => void;
+  onError: (error: string) => void;
+}) {
+  async function act(id: string, action: "disable" | "enable" | "setup-link"): Promise<void> {
+    onError("");
+    try {
+      const result = await api<{ setup_url?: string }>(`/api/operator/accounts/${id}/${action}`, { method: "POST" });
+      if (action === "setup-link" && result.setup_url) {
+        onNotice(`Setup link (shown once): ${result.setup_url}`);
+      } else {
+        onNotice(action === "disable" ? "Account disabled. Its codes stop resolving." : "Account enabled.");
+      }
+      const list = await api<{ accounts: AccountSummary[] }>("/api/operator/accounts");
+      onChange(list.accounts);
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "Could not update the account");
+    }
+  }
+
+  return (
+    <div class="sheet settings">
+      <p class="kicker">Operator</p>
+      <h2>Hosted accounts</h2>
+      <p>Each paid workspace is separate from your own codes. Disable stops its redirects. A setup link clears the password and must be sent by you.</p>
+      {accounts.length === 0 ? <p class="empty-copy">No hosted accounts yet.</p> : null}
+      <ul class="code-list">
+        {accounts.map((account) => (
+          <li key={account.id} class="ticket">
+            <span class="ticket-top">
+              <strong>/u/{account.handle}/</strong>
+              <span>{account.disabled ? "Disabled" : `${account.code_count} codes`}</span>
+            </span>
+            <span class="ticket-title">{account.email}</span>
+            <span class="ticket-dest">
+              {account.password_set ? "Password set" : "Waiting for a password"}
+              {account.test_mode ? " · test order" : ""}
+            </span>
+            <span class="code-actions">
+              {account.disabled ? (
+                <button type="button" onClick={() => void act(account.id, "enable")}>
+                  Enable
+                </button>
+              ) : (
+                <button type="button" onClick={() => void act(account.id, "disable")}>
+                  Disable
+                </button>
+              )}
+              <button type="button" onClick={() => void act(account.id, "setup-link")}>
+                New setup link
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 const path = location.pathname;
-render(path.startsWith("/login") ? <Login /> : <Studio />, document.querySelector("#app")!);
+const page = path.startsWith("/login") ? (
+  <Login />
+) : path.startsWith("/account/login") ? (
+  <AccountLogin />
+) : path === "/welcome" || path.startsWith("/account/setup") ? (
+  <Setup />
+) : path.startsWith("/account") ? (
+  <Studio mode="account" />
+) : (
+  <Studio mode="operator" />
+);
+render(page, document.querySelector("#app")!);
