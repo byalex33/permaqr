@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "permaqr",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-18",
+  "upload_source_maps": true,
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      // Redirect traffic can add up. 10% of traces is enough to see KV and D1 timing.
+      "head_sampling_rate": 0.1
+    }
+  },
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "permaqr",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CODES",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  // Optional Cloudflare Access, in addition to ADMIN_PASSWORD.
+  // Set both, then put the Worker (or just /app and /api) behind an Access application.
+  // "vars": {
+  //   "CF_ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
+  //   "CF_ACCESS_AUD": "your-access-application-aud-tag"
+  // },
+  // "routes": [
+  //   { "pattern": "qr.example.com", "custom_domain": true }
+  // ],
+  "secrets": {
+    "required": ["ADMIN_PASSWORD"]
+  }
+}

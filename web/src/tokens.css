@@ -1,0 +1,47 @@
+@import "@fontsource-variable/fraunces/wght.css";
+@import "@fontsource-variable/fraunces/wght-italic.css";
+@import "@fontsource-variable/outfit/wght.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+:root {
+  --ink: #1b1714;
+  --ink-soft: #3c342c;
+  --muted: #6e665c;
+  --paper: #f3efe4;
+  --paper-deep: #e7e0d0;
+  --sheet: #fbf7ef;
+  --stamp: #e23b2a;
+  --stamp-deep: #9d2418;
+  --moss: #1c6b45;
+  --line: rgba(27, 23, 20, 0.14);
+  --shadow: 0 30px 70px rgba(70, 42, 18, 0.12);
+  --serif: "Fraunces Variable", Fraunces, "Iowan Old Style", Palatino, Georgia, serif;
+  --sans: "Outfit Variable", Outfit, "Avenir Next", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.5;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--stamp); outline-offset: 3px; }
+::selection { background: #f3c1b8; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

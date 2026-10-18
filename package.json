@@ -1,0 +1,54 @@
+{
+  "name": "permaqr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted dynamic QR codes that live on your domain. Runs on Cloudflare's free tier.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run build && npm run db:migrations:apply:local && wrangler dev",
+    "build": "vite build",
+    "predeploy": "npm run build",
+    "deploy": "npm run db:migrations:apply && wrangler deploy",
+    "db:migrations:apply": "wrangler d1 migrations apply DB --remote",
+    "db:migrations:apply:local": "wrangler d1 migrations apply DB --local",
+    "typecheck": "wrangler types && tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p web/tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "cf-typegen": "wrangler types",
+    "dry-run": "npm run build && wrangler deploy --dry-run"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_PASSWORD": {
+        "description": "Password for the single PermaQR dashboard admin. Generate one with `openssl rand -base64 24`."
+      },
+      "DB": {
+        "description": "D1 database named `permaqr`. Stores codes, scan analytics, and the fallback message."
+      },
+      "CODES": {
+        "description": "KV namespace used as the hot cache for redirect lookups. D1 remains the source of truth."
+      }
+    }
+  },
+  "dependencies": {
+    "@fontsource-variable/fraunces": "^5.2.8",
+    "@fontsource-variable/outfit": "^5.2.8",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "pdf-lib": "^1.17.1",
+    "preact": "^10.27.2",
+    "qr-code-styling": "^1.9.2",
+    "uqr": "^0.1.2"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.2.1",
+    "@preact/preset-vite": "^2.10.2",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.45.0"
+  }
+}
