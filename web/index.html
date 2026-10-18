@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PermaQR — dynamic QR codes that never die</title>
+    <meta
+      name="description"
+      content="Your QR code stopped working because you stopped paying. PermaQR lives on your domain forever, free on Cloudflare."
+    />
+    <meta property="og:title" content="PermaQR — your printed QR code, forever" />
+    <meta
+      property="og:description"
+      content="Your QR code stopped working because you stopped paying. PermaQR lives on your domain forever, free on Cloudflare."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://github.com/byalex33/permaqr" />
+    <meta property="og:image" content="/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PermaQR — your printed QR code, forever" />
+    <meta
+      name="twitter:description"
+      content="Your QR code stopped working because you stopped paying. PermaQR lives on your domain forever, free on Cloudflare."
+    />
+    <meta name="twitter:image" content="/og.png" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#f3efe4" />
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="nav">
+      <a class="brand" href="#top">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        PermaQR
+      </a>
+      <nav>
+        <a href="#features">Features</a>
+        <a href="#compare">Compare</a>
+        <a href="https://github.com/byalex33/permaqr">GitHub</a>
+        <a class="nav-login" href="/login">Dashboard</a>
+      </nav>
+    </header>
+
+    <main id="content">
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <p class="kicker"><span class="pulse" aria-hidden="true"></span> Self-hosted · Cloudflare free tier</p>
+          <h1>Your QR code stopped working because you stopped paying.</h1>
+          <p class="lede">
+            PermaQR lives on your domain forever. Change where a printed code goes, any time.
+            The sticker on the door does not care whether a subscription is active.
+          </p>
+          <div class="actions">
+            <a class="btn btn-stamp" href="https://deploy.workers.cloudflare.com/?url=https://github.com/byalex33/permaqr">
+              Deploy to Cloudflare
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/byalex33/permaqr">View the source</a>
+          </div>
+          <p class="fine">MIT licensed. One admin password. No account with us, because there is no us.</p>
+        </div>
+
+        <div class="stage" aria-hidden="false">
+          <article class="poster">
+            <header>
+              <span>Printed once</span>
+              <span>Table 4</span>
+            </header>
+            <div id="qr-live" class="qr-frame">
+              <div class="qr-skeleton"></div>
+            </div>
+            <p class="poster-url">yourdomain.com/menu</p>
+            <p class="poster-note">This square never changes.</p>
+            <span class="stamp-seal">Still works</span>
+          </article>
+          <aside class="phone">
+            <div class="phone-bar"><span></span></div>
+            <p class="phone-label">Opens today</p>
+            <div id="phone-screen" class="phone-screen"></div>
+            <p class="phone-foot">Same code. New destination.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="facts" aria-label="What you get">
+        <p><strong>$0</strong> on the Workers free plan for a personal project</p>
+        <p><strong>302</strong> from the edge, KV first, scan written after the hop</p>
+        <p><strong>No cookies</strong> and no IP addresses in the scan log</p>
+      </section>
+
+      <section class="features" id="features">
+        <div class="section-head">
+          <p class="kicker">What it does</p>
+          <h2>A short link you own, with a printer-friendly QR on top.</h2>
+        </div>
+        <ol>
+          <li>
+            <span>01</span>
+            <h3>Redirects that stay fast</h3>
+            <p>GET /menu looks up the destination in KV and answers 302. The scan is recorded after the response leaves.</p>
+          </li>
+          <li>
+            <span>02</span>
+            <h3>Change the destination</h3>
+            <p>Point a printed code at a menu today and a gift-card page in December. Pause it when the event is over.</p>
+          </li>
+          <li>
+            <span>03</span>
+            <h3>A real QR designer</h3>
+            <p>Colours, dot and corner styles, error correction, quiet zone, and an optional centre logo. Preview as you edit.</p>
+          </li>
+          <li>
+            <span>04</span>
+            <h3>Print-ready files</h3>
+            <p>Export SVG, a high-resolution PNG, or a one-page PDF. Put it on a card, a poster, or a window.</p>
+          </li>
+          <li>
+            <span>05</span>
+            <h3>Privacy-friendly counts</h3>
+            <p>Totals, a chart over time, countries, and devices. Country comes from the Cloudflare request. The IP is dropped.</p>
+          </li>
+          <li>
+            <span>06</span>
+            <h3>Leave whenever you want</h3>
+            <p>Export every code and redirect as JSON or CSV. Import them into another PermaQR, or anywhere else.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="compare" id="compare">
+        <div class="section-head">
+          <p class="kicker">The bill</p>
+          <h2>A printed code should not be a subscription.</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>PermaQR</th>
+                <th>Typical QR subscription</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th>Price</th>
+                <td>Your Cloudflare account, free tier for a small project</td>
+                <td>About $10–20 a month for a couple of dynamic codes</td>
+              </tr>
+              <tr>
+                <th>When you stop paying</th>
+                <td>The code still resolves on your domain</td>
+                <td>The printed code dies with the trial or the invoice</td>
+              </tr>
+              <tr>
+                <th>Where it lives</th>
+                <td>Your Worker, your D1 database, your KV namespace</td>
+                <td>Their servers, their short domain</td>
+              </tr>
+              <tr>
+                <th>Edits</th>
+                <td>Any time, including years later</td>
+                <td>While the subscription is active</td>
+              </tr>
+              <tr>
+                <th>Analytics</th>
+                <td>Country, device, time. No cookies, no IP</td>
+                <td>Their product, their retention rules</td>
+              </tr>
+              <tr>
+                <th>Take the data</th>
+                <td>JSON and CSV, one click</td>
+                <td>Often awkward, sometimes impossible</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="receipts" aria-label="A receipt, compared">
+        <article class="receipt faded">
+          <p class="receipt-brand">QR CLOUD PRO</p>
+          <p class="receipt-line"><span>2 dynamic codes</span><span>$18.00</span></p>
+          <p class="receipt-line"><span>Their short domain</span><span>incl.</span></p>
+          <p class="receipt-line"><span>Cancel any time*</span><span>—</span></p>
+          <hr />
+          <p class="receipt-total"><span>Due monthly</span><span>$18.00</span></p>
+          <p class="receipt-foot">*Your posters do not get the memo.</p>
+        </article>
+        <article class="receipt">
+          <p class="receipt-brand">PERMAQR</p>
+          <p class="receipt-line"><span>Your domain</span><span>$0.00</span></p>
+          <p class="receipt-line"><span>Unlimited edits</span><span>$0.00</span></p>
+          <p class="receipt-line"><span>Codes after you leave</span><span>yours</span></p>
+          <hr />
+          <p class="receipt-total"><span>Due forever</span><span>$0.00</span></p>
+          <p class="receipt-foot">Hosted on the Cloudflare account you already have.</p>
+        </article>
+      </section>
+
+      <section class="steps">
+        <div class="section-head">
+          <p class="kicker">Three steps</p>
+          <h2>Deploy it, print it, change it later.</h2>
+        </div>
+        <ol>
+          <li>
+            <span>1</span>
+            <h3>Deploy</h3>
+            <p>Use the button, or clone the repo and <code>npx wrangler deploy</code>. Set one password.</p>
+          </li>
+          <li>
+            <span>2</span>
+            <h3>Design</h3>
+            <p>Make a short code, style the QR, download SVG, PNG, or PDF, and send it to the printer.</p>
+          </li>
+          <li>
+            <span>3</span>
+            <h3>Repoint</h3>
+            <p>When the menu changes, edit the destination. The ink on the paper stays put.</p>
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div>
+        <span class="brand">
+          <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          PermaQR
+        </span>
+        <p>Open source under the MIT license. Built to be left running.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/byalex33/permaqr">github.com/byalex33/permaqr</a>
+        <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/byalex33/permaqr">Deploy to Cloudflare</a>
+        <a href="/login">Open the dashboard</a>
+      </div>
+    </footer>
+    <script type="module" src="/src/landing.ts"></script>
+  </body>
+</html>
