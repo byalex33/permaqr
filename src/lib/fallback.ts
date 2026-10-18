@@ -12,7 +12,8 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-export async function getFallbackMessage(env: AppEnv): Promise<string> {
+export async function getFallbackMessage(env: AppEnv, accountId?: string): Promise<string> {
+  if (accountId) return readScopedFallback(env, accountId);
   try {
     const cached = await env.CODES.get(CACHE_KEY);
     if (cached) return cached;
@@ -42,15 +43,55 @@ export async function getFallbackMessage(env: AppEnv): Promise<string> {
   return message;
 }
 
-export async function setFallbackMessage(env: AppEnv, message: string): Promise<void> {
+export async function setFallbackMessage(env: AppEnv, message: string, accountId?: string): Promise<void> {
   const value = message.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim().slice(0, 500);
   const stored = value || DEFAULT_FALLBACK_MESSAGE;
+  if (accountId) {
+    await env.DB.prepare(
+      `INSERT INTO account_settings (account_id, fallback_message) VALUES (?, ?)
+       ON CONFLICT(account_id) DO UPDATE SET fallback_message = excluded.fallback_message`,
+    )
+      .bind(accountId, stored)
+      .run();
+    await env.CODES.put(`settings:fallback:account:${accountId}`, stored);
+    return;
+  }
   await env.DB.prepare(
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
   )
     .bind(SETTINGS_KEY, stored)
     .run();
   await env.CODES.put(CACHE_KEY, stored);
+}
+
+async function readScopedFallback(env: AppEnv, accountId: string): Promise<string> {
+  const cacheKey = `settings:fallback:account:${accountId}`;
+  try {
+    const cached = await env.CODES.get(cacheKey);
+    if (cached) return cached;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        message: "fallback cache read failed",
+        error: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+  }
+  const row = await env.DB.prepare("SELECT fallback_message FROM account_settings WHERE account_id = ?")
+    .bind(accountId)
+    .first<{ fallback_message: string }>();
+  const message = row?.fallback_message?.trim() || DEFAULT_FALLBACK_MESSAGE;
+  try {
+    await env.CODES.put(cacheKey, message);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        message: "fallback cache write failed",
+        error: error instanceof Error ? error.message : "unknown",
+      }),
+    );
+  }
+  return message;
 }
 
 export function fallbackPage(options: {

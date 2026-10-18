@@ -271,6 +271,12 @@ td { color: var(--ink-soft); }
 .receipt-total { font-size: 15px; }
 .receipt-foot { margin: 8px 0 0; color: var(--muted); }
 
+.hosted { max-width: 1160px; margin: 0 auto; padding: 72px 28px 0; }
+.hosted-card { max-width: 440px; }
+.hosted-card .btn { margin-top: 18px; }
+#hosted[hidden],
+#hosted-signin[hidden],
+#hosted-nav[hidden] { display: none !important; }
 .steps { padding-bottom: 20px; }
 .site-footer {
   max-width: 1160px;

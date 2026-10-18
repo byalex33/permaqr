@@ -1,5 +1,6 @@
 import type { AppEnv } from "../env";
 import { hasValidAccessJwt } from "./access";
+import { base64UrlToBytes, bytesToBase64Url, sha256Hex } from "./encoding";
 
 export const SESSION_COOKIE = "permaqr_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
@@ -18,25 +19,6 @@ export async function passwordsMatch(provided: string, expected: string): Promis
 async function hmacKey(secret: string): Promise<CryptoKey> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`permaqr-session:${secret}`));
   return crypto.subtle.importKey("raw", digest, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-}
-
-function bytesToBase64Url(bytes: ArrayBuffer | Uint8Array): string {
-  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  let binary = "";
-  for (const byte of view) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
-}
-
-function base64UrlToBytes(input: string): Uint8Array | null {
-  try {
-    const pad = input.length % 4 === 0 ? "" : "=".repeat(4 - (input.length % 4));
-    const binary = atob(input.replaceAll("-", "+").replaceAll("_", "/") + pad);
-    const out = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-    return out;
-  } catch {
-    return null;
-  }
 }
 
 export async function signSession(password: string, now = Date.now()): Promise<string> {
@@ -63,10 +45,70 @@ export async function verifySession(password: string, token: string, now = Date.
   const payloadBytes = base64UrlToBytes(payload);
   if (!payloadBytes) return false;
   try {
-    const data = JSON.parse(new TextDecoder().decode(payloadBytes)) as { exp?: unknown };
+    const data = JSON.parse(new TextDecoder().decode(payloadBytes)) as { exp?: unknown; kind?: unknown };
+    // Hosted account cookies share this signature key but must not open the operator dashboard.
+    if (data.kind !== undefined) return false;
     return typeof data.exp === "number" && data.exp > now;
   } catch {
     return false;
+  }
+}
+
+export async function passwordVersion(passwordHash: string): Promise<string> {
+  return (await sha256Hex(passwordHash)).slice(0, 16);
+}
+
+export async function signAccountSession(
+  secret: string,
+  accountId: string,
+  passwordHash: string,
+  now = Date.now(),
+): Promise<string> {
+  const payload = bytesToBase64Url(
+    new TextEncoder().encode(
+      JSON.stringify({
+        exp: now + SESSION_TTL_SECONDS * 1000,
+        kind: "account",
+        sub: accountId,
+        ver: await passwordVersion(passwordHash),
+      }),
+    ),
+  );
+  const key = await hmacKey(secret);
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return `${payload}.${bytesToBase64Url(signature)}`;
+}
+
+export async function readAccountSession(
+  secret: string,
+  token: string,
+  now = Date.now(),
+): Promise<{ sub: string; ver: string } | null> {
+  const dot = token.indexOf(".");
+  if (dot <= 0) return null;
+  const payload = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
+  const actual = base64UrlToBytes(signature);
+  if (!actual) return null;
+  const key = await hmacKey(secret);
+  const expected = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload)));
+  if (expected.byteLength !== actual.byteLength) return null;
+  if (!crypto.subtle.timingSafeEqual(expected, actual)) return null;
+  const payloadBytes = base64UrlToBytes(payload);
+  if (!payloadBytes) return null;
+  try {
+    const data = JSON.parse(new TextDecoder().decode(payloadBytes)) as {
+      exp?: unknown;
+      kind?: unknown;
+      sub?: unknown;
+      ver?: unknown;
+    };
+    if (data.kind !== "account") return null;
+    if (typeof data.exp !== "number" || data.exp <= now) return null;
+    if (typeof data.sub !== "string" || typeof data.ver !== "string") return null;
+    return { sub: data.sub, ver: data.ver };
+  } catch {
+    return null;
   }
 }
 
